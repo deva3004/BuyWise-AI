@@ -2,9 +2,11 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.adapters import MockAdapter
 from app.database import SessionLocal
-from app.models import ProductVariant, Watchlist
-from app.schemas import WatchlistCreate, WatchlistOut
+from app.models import Offer, Product, ProductVariant, Watchlist
+from app.persistence import persist_offers
+from app.schemas import OfferOut, SearchRequest, WatchlistCreate, WatchlistOut
 
 
 app = FastAPI()
@@ -50,3 +52,55 @@ def create_watchlist(
     db.refresh(db_watchlist)
 
     return db_watchlist
+
+
+@app.post("/search", response_model=list[OfferOut])
+def search_offers(
+    request: SearchRequest,
+    db: Session = Depends(get_db)
+):
+    variant = (
+        db.query(ProductVariant)
+        .filter(ProductVariant.variant_id == request.variant_id)
+        .first()
+    )
+    if variant is None:
+        raise HTTPException(status_code=404, detail="Product variant not found")
+
+    query = variant.product.name
+    if variant.sku:
+        query = f"{query} {variant.sku}"
+
+    adapter = MockAdapter()
+    normalized_offers = adapter.search(query)
+
+    persist_offers(db, request.variant_id, normalized_offers)
+
+    offers = (
+        db.query(Offer)
+        .filter(Offer.variant_id == request.variant_id)
+        .all()
+    )
+    return offers
+
+
+@app.get("/products/{product_id}/offers", response_model=list[OfferOut])
+def get_product_offers(
+    product_id: int,
+    db: Session = Depends(get_db)
+):
+    product = (
+        db.query(Product)
+        .filter(Product.product_id == product_id)
+        .first()
+    )
+    if product is None:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    offers = (
+        db.query(Offer)
+        .join(ProductVariant, Offer.variant_id == ProductVariant.variant_id)
+        .filter(ProductVariant.product_id == product_id)
+        .all()
+    )
+    return offers

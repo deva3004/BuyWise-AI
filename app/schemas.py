@@ -17,3 +17,20 @@ class WatchlistOut(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SearchRequest(BaseModel):
+    variant_id: int
+
+
+class OfferOut(BaseModel):
+    offer_id: int
+    variant_id: int
+    seller_id: int
+    current_price: float
+    currency: str
+    availability: str
+    product_url: str | None
+    last_checked_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
