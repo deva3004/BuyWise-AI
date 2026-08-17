@@ -95,6 +95,45 @@ class Seller(Base):
         back_populates="seller"
     )
 
+    policies = relationship(
+        "SellerPolicy",
+        back_populates="seller"
+    )
+
+
+class SellerPolicy(Base):
+    __tablename__ = "seller_policies"
+
+    policy_id = Column(BigInteger, primary_key=True)
+
+    seller_id = Column(
+        BigInteger,
+        ForeignKey("sellers.seller_id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    # e.g. "return", "warranty", "shipping", "cancellation"
+    policy_type = Column(String(50), nullable=False)
+
+    # nullable — a policy without a category applies to all of the
+    # seller's products; a value here scopes it (e.g. "electronics")
+    category = Column(String(100))
+
+    policy_text = Column(Text, nullable=False)
+    source_url = Column(Text)
+
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    seller = relationship(
+        "Seller",
+        back_populates="policies"
+    )
+
 
 class Offer(Base):
     __tablename__ = "offers"

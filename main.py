@@ -1,12 +1,24 @@
 from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError 
 from sqlalchemy.orm import Session
 
-from app.adapters import MockAdapter
+from app.agent import run_agent
 from app.database import SessionLocal
-from app.models import Offer, Product, ProductVariant, Watchlist
-from app.persistence import persist_offers
-from app.schemas import OfferOut, SearchRequest, WatchlistCreate, WatchlistOut
+from app.models import Offer, Product, ProductVariant, Seller, SellerPolicy, Watchlist
+from app.rag import embed_policy, retrieve_policy_chunks
+from app.tools import search_offers as search_offers_core
+from app.schemas import (
+    AgentRequest,
+    AgentResponse,
+    OfferOut,
+    PolicyChunkOut,
+    PolicySearchRequest,
+    SearchRequest,
+    SellerPolicyCreate,
+    SellerPolicyOut,
+    WatchlistCreate,
+    WatchlistOut,
+)
 
 
 app = FastAPI()
@@ -59,28 +71,10 @@ def search_offers(
     request: SearchRequest,
     db: Session = Depends(get_db)
 ):
-    variant = (
-        db.query(ProductVariant)
-        .filter(ProductVariant.variant_id == request.variant_id)
-        .first()
-    )
-    if variant is None:
+    offers = search_offers_core(db, request.variant_id)
+    if offers is None:
         raise HTTPException(status_code=404, detail="Product variant not found")
 
-    query = variant.product.name
-    if variant.sku:
-        query = f"{query} {variant.sku}"
-
-    adapter = MockAdapter()
-    normalized_offers = adapter.search(query)
-
-    persist_offers(db, request.variant_id, normalized_offers)
-
-    offers = (
-        db.query(Offer)
-        .filter(Offer.variant_id == request.variant_id)
-        .all()
-    )
     return offers
 
 
@@ -104,3 +98,46 @@ def get_product_offers(
         .all()
     )
     return offers
+
+
+@app.post("/seller-policies", response_model=SellerPolicyOut)
+def create_seller_policy(
+    policy: SellerPolicyCreate,
+    db: Session = Depends(get_db)
+):
+    seller_exists = (
+        db.query(Seller)
+        .filter(Seller.seller_id == policy.seller_id)
+        .first()
+    )
+    if seller_exists is None:
+        raise HTTPException(status_code=404, detail="Seller not found")
+
+    db_policy = SellerPolicy(
+        seller_id=policy.seller_id,
+        policy_type=policy.policy_type,
+        category=policy.category,
+        policy_text=policy.policy_text,
+        source_url=policy.source_url,
+    )
+
+    db.add(db_policy)
+    db.commit()
+    db.refresh(db_policy)
+
+    # Postgres write is the source of truth; embed into Chroma right after
+    # so the vector index stays in sync with what was just persisted.
+    embed_policy(db_policy)
+
+    return db_policy
+
+
+@app.post("/seller-policies/search", response_model=list[PolicyChunkOut])
+def search_seller_policies(request: PolicySearchRequest):
+    return retrieve_policy_chunks(request.query, n_results=request.n_results)
+
+
+@app.post("/agent", response_model=AgentResponse)
+def ask_agent(request: AgentRequest):
+    answer = run_agent(request.message)
+    return AgentResponse(answer=answer)

@@ -56,6 +56,21 @@ CREATE TABLE price_history (
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Free-text seller policy content (return/warranty/shipping/cancellation).
+-- Source of truth for the RAG layer: Postgres holds the raw text,
+-- ChromaDB holds a derived, rebuildable vector index over chunks of it.
+-- category is nullable — NULL means the policy applies to all of the
+-- seller's products; a value scopes it to one product category.
+CREATE TABLE seller_policies (
+    policy_id BIGSERIAL PRIMARY KEY,
+    seller_id BIGINT NOT NULL REFERENCES sellers(seller_id) ON DELETE CASCADE,
+    policy_type VARCHAR(50) NOT NULL,
+    category VARCHAR(100),
+    policy_text TEXT NOT NULL,
+    source_url TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- What a user is tracking. user_id is a plain string for now — no auth
 -- system in scope yet, just a stable identifier.
 CREATE TABLE watchlists (

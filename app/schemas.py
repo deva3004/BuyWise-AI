@@ -34,3 +34,41 @@ class OfferOut(BaseModel):
     last_checked_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SellerPolicyCreate(BaseModel):
+    seller_id: int
+    policy_type: str
+    category: str | None = None
+    policy_text: str
+    source_url: str | None = None
+
+
+class SellerPolicyOut(BaseModel):
+    policy_id: int
+    seller_id: int
+    policy_type: str
+    category: str | None
+    policy_text: str
+    source_url: str | None
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PolicySearchRequest(BaseModel):
+    query: str
+    n_results: int = 3
+
+
+class PolicyChunkOut(BaseModel):
+    text: str
+    metadata: dict
+
+
+class AgentRequest(BaseModel):
+    message: str
+
+
+class AgentResponse(BaseModel):
+    answer: str
