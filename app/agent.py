@@ -17,7 +17,7 @@ load_dotenv()
 
 _client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-MODEL_NAME = "llama-3.3-70b-versatile"
+MODEL_NAME = "openai/gpt-oss-20b"
 
 # Hard cap on tool-call round trips. Without this, a model that keeps
 # calling tools (bad args, confused reasoning, etc.) loops forever and

@@ -71,11 +71,11 @@ def search_offers(
     request: SearchRequest,
     db: Session = Depends(get_db)
 ):
-    offers = search_offers_core(db, request.variant_id)
-    if offers is None:
+    result = search_offers_core(db, request.variant_id)
+    if result is None:
         raise HTTPException(status_code=404, detail="Product variant not found")
 
-    return offers
+    return result.offers
 
 
 @app.get("/products/{product_id}/offers", response_model=list[OfferOut])

@@ -5,7 +5,9 @@
 # LLM. The LLM only ever proposes a name + arguments — TOOL_REGISTRY is
 # what decides what's actually permitted to run.
 
-from sqlalchemy.orm import Session
+from dataclasses import dataclass
+
+from sqlalchemy.orm import Session, joinedload
 
 from app.adapters import MockAdapter
 from app.database import SessionLocal
@@ -13,10 +15,35 @@ from app.models import Offer, ProductVariant
 from app.persistence import persist_offers
 from app.rag import retrieve_policy_chunks
 
+MIN_SELLER_RATING = 3.0
 
-def search_offers(db: Session, variant_id: int) -> list[Offer] | None:
+
+@dataclass
+class OfferSearchResult:
+    offers: list[Offer]
+    filtered_out_count: int
+
+
+def _passes_guardrails(offer: Offer) -> bool:
+    """Hard rules, enforced in code, before an offer is visible to any
+    caller (endpoint or agent). A seller with no rating yet is not the
+    same as a seller with a bad rating, so a missing rating does not
+    disqualify an offer — only an explicit low rating or is_blocked does.
+    """
+    seller = offer.seller
+    if seller.is_blocked:
+        return False
+    if seller.rating is not None and seller.rating < MIN_SELLER_RATING:
+        return False
+    return True
+
+
+def search_offers(db: Session, variant_id: int) -> OfferSearchResult | None:
     """Core logic shared by the /search endpoint and the search_offers tool.
-    Returns None if variant_id doesn't exist, otherwise the persisted offers.
+    Returns None if variant_id doesn't exist, otherwise an OfferSearchResult
+    holding the offers that survive the guardrail filter plus a count of how
+    many were filtered out (so callers can tell "nothing found" apart from
+    "found offers, but none were eligible").
     """
     variant = (
         db.query(ProductVariant)
@@ -34,10 +61,18 @@ def search_offers(db: Session, variant_id: int) -> list[Offer] | None:
     normalized_offers = adapter.search(query)
     persist_offers(db, variant_id, normalized_offers)
 
-    return (
+    all_offers = (
         db.query(Offer)
+        .options(joinedload(Offer.seller))
         .filter(Offer.variant_id == variant_id)
         .all()
+    )
+
+    eligible_offers = [o for o in all_offers if _passes_guardrails(o)]
+
+    return OfferSearchResult(
+        offers=eligible_offers,
+        filtered_out_count=len(all_offers) - len(eligible_offers),
     )
 
 
@@ -48,9 +83,18 @@ def search_offers_tool(variant_id: int) -> dict:
     """
     db = SessionLocal()
     try:
-        offers = search_offers(db, variant_id)
-        if offers is None:
+        result = search_offers(db, variant_id)
+        if result is None:
             return {"error": f"No product variant found with variant_id={variant_id}"}
+
+        if not result.offers and result.filtered_out_count > 0:
+            return {
+                "offers": [],
+                "message": (
+                    "I found offers, but none met the seller eligibility "
+                    "requirements."
+                ),
+            }
 
         return {
             "offers": [
@@ -60,7 +104,7 @@ def search_offers_tool(variant_id: int) -> dict:
                     "currency": offer.currency,
                     "availability": offer.availability,
                 }
-                for offer in offers
+                for offer in result.offers
             ]
         }
     finally:
