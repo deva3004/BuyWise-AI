@@ -198,6 +198,10 @@ class Offer(Base):
         back_populates="offer"
     )
 
+    @property
+    def seller_name(self) -> str:
+        return self.seller.name
+
     __table_args__ = (
         UniqueConstraint("variant_id", "seller_id"),
     )

@@ -24,15 +24,34 @@ class SearchRequest(BaseModel):
     variant_id: int
 
 
+class ProductOut(BaseModel):
+    product_id: int
+    name: str
+    brand: str | None
+    category: str | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class OfferOut(BaseModel):
     offer_id: int
     variant_id: int
     seller_id: int
+    seller_name: str
     current_price: float
     currency: str
     availability: str
     product_url: str | None
     last_checked_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VariantOut(BaseModel):
+    variant_id: int
+    product_id: int
+    sku: str | None
+    attributes: dict
 
     model_config = ConfigDict(from_attributes=True)
 
