@@ -73,15 +73,20 @@ def embed_policy(policy: SellerPolicy, collection: Collection | None = None) -> 
 def retrieve_policy_chunks(
     query: str,
     n_results: int = 3,
+    seller_id: int | None = None,
     collection: Collection | None = None,
 ) -> list[dict]:
     collection = collection or get_collection()
     query_embedding = _embedding_model.encode([query]).tolist()
 
-    results = collection.query(
-        query_embeddings=query_embedding,
-        n_results=n_results,
-    )
+    query_kwargs = {
+        "query_embeddings": query_embedding,
+        "n_results": n_results,
+    }
+    if seller_id is not None:
+        query_kwargs["where"] = {"seller_id": seller_id}
+
+    results = collection.query(**query_kwargs)
 
     documents = results["documents"][0] if results["documents"] else []
     metadatas = results["metadatas"][0] if results["metadatas"] else []

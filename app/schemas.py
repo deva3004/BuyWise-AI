@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -59,6 +60,7 @@ class SellerPolicyOut(BaseModel):
 class PolicySearchRequest(BaseModel):
     query: str
     n_results: int = 3
+    seller_id: int | None = None
 
 
 class PolicyChunkOut(BaseModel):
@@ -71,4 +73,5 @@ class AgentRequest(BaseModel):
 
 
 class AgentResponse(BaseModel):
-    answer: str
+    decision: Literal["BUY", "WAIT", "RE-EVALUATE", "unable_to_decide"]
+    reasoning: str

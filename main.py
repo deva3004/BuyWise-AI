@@ -134,10 +134,10 @@ def create_seller_policy(
 
 @app.post("/seller-policies/search", response_model=list[PolicyChunkOut])
 def search_seller_policies(request: PolicySearchRequest):
-    return retrieve_policy_chunks(request.query, n_results=request.n_results)
+    return retrieve_policy_chunks(request.query, n_results=request.n_results, seller_id=request.seller_id)
 
 
 @app.post("/agent", response_model=AgentResponse)
 def ask_agent(request: AgentRequest):
-    answer = run_agent(request.message)
-    return AgentResponse(answer=answer)
+    decision = run_agent(request.message)
+    return AgentResponse(decision=decision.decision, reasoning=decision.reasoning)

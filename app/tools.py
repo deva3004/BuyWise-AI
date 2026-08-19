@@ -111,8 +111,8 @@ def search_offers_tool(variant_id: int) -> dict:
         db.close()
 
 
-def search_policies_tool(query: str, n_results: int = 3) -> dict:
-    return {"results": retrieve_policy_chunks(query, n_results=n_results)}
+def search_policies_tool(query: str, n_results: int = 3, seller_id: int | None = None) -> dict:
+    return {"results": retrieve_policy_chunks(query, n_results=n_results, seller_id=seller_id)}
 
 
 TOOL_DEFINITIONS = [
@@ -156,6 +156,10 @@ TOOL_DEFINITIONS = [
                         "type": "integer",
                         "description": "Number of policy chunks to retrieve.",
                         "default": 3,
+                    },
+                    "seller_id": {
+                        "type": "integer",
+                        "description": "Optional seller ID. Use this once you already know the seller_id so policy results are scoped to that seller.",
                     },
                 },
                 "required": ["query"],
