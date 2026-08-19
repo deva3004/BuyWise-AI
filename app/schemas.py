@@ -72,6 +72,27 @@ class AgentRequest(BaseModel):
     message: str
 
 
+class SearchOffersArgs(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    variant_id: int
+
+
+class SearchPoliciesArgs(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    query: str
+    n_results: int = 3
+    seller_id: int | None = None
+
+
+class SubmitDecisionArgs(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    decision: Literal["BUY", "WAIT", "RE-EVALUATE"]
+    reasoning: str
+
+
 class AgentResponse(BaseModel):
     decision: Literal["BUY", "WAIT", "RE-EVALUATE", "unable_to_decide"]
     reasoning: str
