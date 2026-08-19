@@ -37,12 +37,54 @@ infrastructure cost.
 
 ## Setup
 
-<!-- TODO: fill in once there's something runnable (Day 1+):
-     - prerequisites
-     - env vars / .env.example
-     - install steps
-     - how to run locally (docker compose up)
-     - how to run tests -->
+### Option A — Docker (recommended, closest to how this would actually deploy)
+
+Prerequisites: Docker + Docker Compose.
+
+```bash
+cp .env.example .env   # fill in GROQ_API_KEY at minimum
+docker compose up --build
+```
+
+This starts three containers: Postgres (with a persistent volume),
+the FastAPI backend (`uvicorn`, migrations applied automatically on
+startup), and the Streamlit frontend. Once it's up:
+
+- Frontend: http://localhost:8501
+- API: http://localhost:8000 (docs at http://localhost:8000/docs)
+
+The database starts empty. To populate it with a mock catalog (products,
+sellers, offers, seller policies) so the frontend has something to
+browse:
+
+```bash
+docker compose exec api python -m db.seed_mock_data
+```
+
+### Option B — Local dev (no Docker)
+
+Prerequisites: Python 3.11+, [`uv`](https://docs.astral.sh/uv/), a
+running Postgres instance.
+
+```bash
+cp .env.example .env       # set DATABASE_URL to your local Postgres, add GROQ_API_KEY
+uv sync
+uv run alembic upgrade head
+uv run python -m db.seed_mock_data   # optional: mock catalog data
+
+uv run uvicorn main:app --reload          # terminal 1 — API on :8000
+uv run streamlit run streamlit_app.py     # terminal 2 — frontend on :8501
+```
+
+### Tests / eval
+
+```bash
+uv run python -m eval.run_eval
+```
+
+Runs a small fixed set of agent decision scenarios (guardrail-eligible
+and guardrail-blocked) against a live backend + Groq and reports
+pass/fail — see `PROJECT_STATE.md` for what it currently covers.
 
 ## Roadmap
 

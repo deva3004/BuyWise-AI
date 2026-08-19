@@ -1,0 +1,11 @@
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+.git
+.env
+chroma_data
+CLAUDE.md
+PROJECT_STATE.md
+ROADMAP.md
+PROBLEMS_FACED.md

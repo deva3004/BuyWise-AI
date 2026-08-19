@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-buywise}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-buywise}
+      POSTGRES_DB: ${POSTGRES_DB:-buywise}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-buywise}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-buywise}:${POSTGRES_PASSWORD:-buywise}@postgres:5432/${POSTGRES_DB:-buywise}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+    volumes:
+      - chroma_data:/app/chroma_data
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: .
+    command: streamlit run streamlit_app.py --server.address 0.0.0.0 --server.port 8501
+    environment:
+      API_BASE_URL: http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  chroma_data:
