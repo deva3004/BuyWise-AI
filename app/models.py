@@ -238,13 +238,34 @@ class PriceHistory(Base):
     )
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    user_id = Column(BigInteger, primary_key=True)
+    username = Column(String(50), nullable=False, unique=True, index=True)
+    # bcrypt output is always exactly 60 chars - fixed-width column
+    # documents that rather than leaving it looking arbitrary.
+    password_hash = Column(String(60), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    watchlists = relationship(
+        "Watchlist",
+        back_populates="user"
+    )
+
+
 class Watchlist(Base):
     __tablename__ = "watchlists"
 
     watchlist_id = Column(BigInteger, primary_key=True)
 
     user_id = Column(
-        String(100),
+        BigInteger,
+        ForeignKey("users.user_id", ondelete="CASCADE"),
         nullable=False
     )
 
@@ -265,6 +286,11 @@ class Watchlist(Base):
         TIMESTAMP(timezone=True),
         nullable=False,
         server_default=func.now(),
+    )
+
+    user = relationship(
+        "User",
+        back_populates="watchlists"
     )
 
     variant = relationship(

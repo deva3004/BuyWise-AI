@@ -16,7 +16,12 @@ from dotenv import load_dotenv
 from groq import Groq
 from pydantic import ValidationError
 
-from app.schemas import SearchOffersArgs, SearchPoliciesArgs, SubmitDecisionArgs
+from app.schemas import (
+    GetMyWatchlistArgs,
+    SearchOffersArgs,
+    SearchPoliciesArgs,
+    SubmitDecisionArgs,
+)
 from app.tools import TOOL_DEFINITIONS, TOOL_REGISTRY
 
 load_dotenv()
@@ -44,8 +49,10 @@ SYSTEM_PROMPT = (
     "with one of BUY, WAIT, or RE-EVALUATE and your reasoning. Offers "
     "returned by search_offers have already been filtered against hard "
     "seller-eligibility rules (rating, blocked status) — never second-guess "
-    "or override that filtering yourself. You must call submit_decision to "
-    "finish; do not answer in plain text."
+    "or override that filtering yourself. If the user refers to 'my "
+    "watchlist' or something they're tracking without giving a variant_id, "
+    "call get_my_watchlist first to find out what they mean. You must call "
+    "submit_decision to finish; do not answer in plain text."
 )
 
 # Not a real action — never registered in TOOL_REGISTRY. The loop
@@ -83,10 +90,15 @@ TOOL_ARG_MODELS = {
     "search_offers": SearchOffersArgs,
     "search_policies": SearchPoliciesArgs,
     "submit_decision": SubmitDecisionArgs,
+    "get_my_watchlist": GetMyWatchlistArgs,
 }
 
 
-def run_agent(user_message: str) -> AgentDecision:
+def run_agent(user_message: str, user_id: int | None = None) -> AgentDecision:
+    """user_id comes from the authenticated request (app/auth.py), not
+    from the message text - it's how get_my_watchlist knows whose
+    watchlist to read without the model ever choosing that itself.
+    """
     trace = {
         "run_id": str(uuid.uuid4()),
         "user_message": user_message,
@@ -135,7 +147,7 @@ def run_agent(user_message: str) -> AgentDecision:
                 })
                 return finish(decision)
 
-            result = _execute_tool_call(tool_call)
+            result = _execute_tool_call(tool_call, user_id)
             trace["events"].append({
                 "iteration": iteration,
                 "tool": tool_call.function.name,
@@ -191,7 +203,7 @@ def _parse_decision(tool_call) -> AgentDecision:
     return AgentDecision(decision=args["decision"], reasoning=args["reasoning"])
 
 
-def _execute_tool_call(tool_call) -> dict:
+def _execute_tool_call(tool_call, user_id: int | None) -> dict:
     """The allowlist boundary: the model only ever proposes a name +
     arguments here. TOOL_REGISTRY decides what's actually permitted to
     run, and _validate_tool_args catches bad args (structural or typed)
@@ -204,6 +216,15 @@ def _execute_tool_call(tool_call) -> dict:
     args, error = _validate_tool_args(tool_call)
     if error is not None:
         return error
+
+    # get_my_watchlist's user_id is never taken from the model's own
+    # arguments (GetMyWatchlistArgs has no fields) - it's injected here
+    # from the authenticated caller, so the agent can only ever read the
+    # watchlist of whoever is actually asking.
+    if tool_call.function.name == "get_my_watchlist":
+        if user_id is None:
+            return {"error": "No signed-in user for this request."}
+        args = {"user_id": user_id}
 
     try:
         return tool_fn(**args)

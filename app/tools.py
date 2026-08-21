@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.adapters import MockAdapter
 from app.database import SessionLocal
-from app.models import Offer, ProductVariant
+from app.models import Offer, ProductVariant, Watchlist
 from app.persistence import persist_offers
 from app.rag import retrieve_policy_chunks
 
@@ -115,6 +115,50 @@ def search_policies_tool(query: str, n_results: int = 3, seller_id: int | None =
     return {"results": retrieve_policy_chunks(query, n_results=n_results, seller_id=seller_id)}
 
 
+def get_user_watchlist(db: Session, user_id: int) -> list[Watchlist]:
+    """Core logic shared by GET /watchlist and the get_my_watchlist tool."""
+    return (
+        db.query(Watchlist)
+        .options(joinedload(Watchlist.variant).joinedload(ProductVariant.product))
+        .filter(Watchlist.user_id == user_id)
+        .all()
+    )
+
+
+def get_my_watchlist_tool(user_id: int) -> dict:
+    """Agent-facing wrapper. user_id is injected by _execute_tool_call
+    from the authenticated request, never taken from the model's own
+    arguments (see GetMyWatchlistArgs) - otherwise the agent could be
+    talked into reading a different user's watchlist just by being asked.
+    """
+    db = SessionLocal()
+    try:
+        items = get_user_watchlist(db, user_id)
+        if not items:
+            return {
+                "watchlist": [],
+                "message": "This user has nothing on their watchlist yet.",
+            }
+
+        return {
+            "watchlist": [
+                {
+                    "variant_id": item.variant_id,
+                    "product_name": item.variant.product.name,
+                    "sku": item.variant.sku,
+                    "target_price": (
+                        float(item.target_price)
+                        if item.target_price is not None
+                        else None
+                    ),
+                }
+                for item in items
+            ]
+        }
+    finally:
+        db.close()
+
+
 TOOL_DEFINITIONS = [
     {
         "type": "function",
@@ -166,9 +210,27 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_my_watchlist",
+            "description": (
+                "Get the current signed-in user's watchlist - the product "
+                "variants they're tracking and their target prices. Use "
+                "this when the user refers to 'my watchlist' or something "
+                "they're tracking without naming a variant_id directly."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]
 
 TOOL_REGISTRY = {
     "search_offers": search_offers_tool,
     "search_policies": search_policies_tool,
+    "get_my_watchlist": get_my_watchlist_tool,
 }

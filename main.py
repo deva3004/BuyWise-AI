@@ -4,13 +4,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.agent import run_agent
+from app.auth import create_access_token, get_current_user_id, hash_password, verify_password
 from app.database import SessionLocal
-from app.models import Offer, Product, ProductVariant, Seller, SellerPolicy, Watchlist
+from app.models import Offer, Product, ProductVariant, Seller, SellerPolicy, User, Watchlist
 from app.rag import embed_policy, retrieve_policy_chunks
-from app.tools import search_offers as search_offers_core
+from app.tools import get_user_watchlist, search_offers as search_offers_core
 from app.schemas import (
     AgentRequest,
     AgentResponse,
+    LoginRequest,
     OfferOut,
     PolicyChunkOut,
     PolicySearchRequest,
@@ -18,6 +20,9 @@ from app.schemas import (
     SearchRequest,
     SellerPolicyCreate,
     SellerPolicyOut,
+    Token,
+    UserCreate,
+    UserOut,
     VariantOut,
     WatchlistCreate,
     WatchlistOut,
@@ -36,9 +41,41 @@ def get_db():
         db.close()
 
 
+@app.post("/auth/signup", response_model=UserOut, status_code=201)
+def signup(user: UserCreate, db: Session = Depends(get_db)):
+    db_user = User(
+        username=user.username,
+        password_hash=hash_password(user.password),
+    )
+
+    db.add(db_user)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Username already taken")
+    db.refresh(db_user)
+
+    return db_user
+
+
+@app.post("/auth/login", response_model=Token)
+def login(request: LoginRequest, db: Session = Depends(get_db)):
+    db_user = (
+        db.query(User)
+        .filter(User.username == request.username)
+        .first()
+    )
+    if db_user is None or not verify_password(request.password, db_user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    return Token(access_token=create_access_token(db_user.user_id))
+
+
 @app.post("/watchlist", response_model=WatchlistOut)
 def create_watchlist(
     watchlist: WatchlistCreate,
+    user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db)
 ):
     variant_exists = (
@@ -50,7 +87,7 @@ def create_watchlist(
         raise HTTPException(status_code=404, detail="Product variant not found")
 
     db_watchlist = Watchlist(
-        user_id=watchlist.user_id,
+        user_id=user_id,
         variant_id=watchlist.variant_id,
         target_price=watchlist.target_price
     )
@@ -62,11 +99,19 @@ def create_watchlist(
         db.rollback()
         raise HTTPException(
             status_code=409,
-            detail="This user is already watching this variant"
+            detail="You're already watching this variant"
         )
     db.refresh(db_watchlist)
 
     return db_watchlist
+
+
+@app.get("/watchlist", response_model=list[WatchlistOut])
+def list_watchlist(
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db)
+):
+    return get_user_watchlist(db, user_id)
 
 
 @app.post("/search", response_model=list[OfferOut])
@@ -176,6 +221,9 @@ def search_seller_policies(request: PolicySearchRequest):
 
 
 @app.post("/agent", response_model=AgentResponse)
-def ask_agent(request: AgentRequest):
-    decision = run_agent(request.message)
+def ask_agent(
+    request: AgentRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    decision = run_agent(request.message, user_id=user_id)
     return AgentResponse(decision=decision.decision, reasoning=decision.reasoning)
