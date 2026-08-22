@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.dependencies import get_db
 from app.models import Offer, Product, ProductVariant
+from app.rate_limit import limit_by_ip, search_limiter
 from app.schemas import OfferOut, ProductOut, SearchRequest, VariantOut
 from app.tools import search_offers as search_offers_core
 
@@ -22,7 +23,11 @@ def search_offers(
     return result.offers
 
 
-@router.get("/products/search", response_model=list[ProductOut])
+@router.get(
+    "/products/search",
+    response_model=list[ProductOut],
+    dependencies=[Depends(limit_by_ip(search_limiter))],
+)
 def search_products(
     q: str,
     limit: int = 20,

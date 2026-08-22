@@ -5,13 +5,18 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user_id
 from app.dependencies import get_db
 from app.models import ProductVariant, Watchlist
+from app.rate_limit import limit_by_user, watchlist_limiter
 from app.schemas import WatchlistCreate, WatchlistOut
 from app.tools import get_user_watchlist
 
 router = APIRouter(prefix="/watchlist", tags=["watchlist"])
 
 
-@router.post("", response_model=WatchlistOut)
+@router.post(
+    "",
+    response_model=WatchlistOut,
+    dependencies=[Depends(limit_by_user(watchlist_limiter))],
+)
 def create_watchlist(
     watchlist: WatchlistCreate,
     user_id: int = Depends(get_current_user_id),
@@ -45,7 +50,11 @@ def create_watchlist(
     return db_watchlist
 
 
-@router.get("", response_model=list[WatchlistOut])
+@router.get(
+    "",
+    response_model=list[WatchlistOut],
+    dependencies=[Depends(limit_by_user(watchlist_limiter))],
+)
 def list_watchlist(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db)
