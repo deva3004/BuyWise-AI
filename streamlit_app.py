@@ -175,11 +175,19 @@ def api_call(
     path: str,
     *,
     payload: dict[str, Any] | None = None,
+    auth: bool = False,
     timeout: int = REQUEST_TIMEOUT,
 ) -> Any:
     """Single choke point for backend traffic — every failure becomes an ApiError."""
+    headers = {}
+    if auth:
+        token = st.session_state.get("token")
+        if not token:
+            raise ApiError("You need to be logged in for this action.")
+        headers["Authorization"] = f"Bearer {token}"
+
     try:
-        response = requests.request(method, f"{API_BASE_URL}{path}", json=payload, timeout=timeout)
+        response = requests.request(method, f"{API_BASE_URL}{path}", json=payload, headers=headers, timeout=timeout)
     except requests.exceptions.Timeout:
         raise ApiError(f"The backend did not respond within {timeout}s. It may still be working — try again.")
     except requests.exceptions.ConnectionError:
@@ -194,6 +202,14 @@ def api_call(
         return response.json()
     except ValueError:
         raise ApiError("The backend returned a response that was not valid JSON.")
+
+
+def signup_user(username: str, password: str) -> dict[str, Any]:
+    return api_call("POST", "/auth/signup", payload={"username": username, "password": password})
+
+
+def login_user(username: str, password: str) -> dict[str, Any]:
+    return api_call("POST", "/auth/login", payload={"username": username, "password": password})
 
 
 def search_products_by_name(query: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -212,12 +228,17 @@ def fetch_product_variants(product_id: int) -> list[dict[str, Any]]:
     return api_call("GET", f"/products/{product_id}/variants")
 
 
-def create_watchlist_entry(user_id: str, variant_id: int, target_price: float | None) -> dict[str, Any]:
+def create_watchlist_entry(variant_id: int, target_price: float | None) -> dict[str, Any]:
     return api_call(
         "POST",
         "/watchlist",
-        payload={"user_id": user_id, "variant_id": variant_id, "target_price": target_price},
+        payload={"variant_id": variant_id, "target_price": target_price},
+        auth=True,
     )
+
+
+def fetch_my_watchlist() -> list[dict[str, Any]]:
+    return api_call("GET", "/watchlist", auth=True)
 
 
 def create_seller_policy(
@@ -249,7 +270,7 @@ def search_seller_policies(query: str, n_results: int, seller_id: int | None) ->
 
 
 def ask_agent(message: str) -> dict[str, Any]:
-    return api_call("POST", "/agent", payload={"message": message}, timeout=AGENT_TIMEOUT)
+    return api_call("POST", "/agent", payload={"message": message}, auth=True, timeout=AGENT_TIMEOUT)
 
 
 @st.cache_data(ttl=20, show_spinner=False)
@@ -294,6 +315,13 @@ def hero(kicker: str, title: str, subtitle: str) -> None:
 
 def empty_state(message: str) -> None:
     st.markdown(f'<div class="bw-empty">{html.escape(message)}</div>', unsafe_allow_html=True)
+
+
+def require_login() -> bool:
+    if st.session_state.get("token"):
+        return True
+    empty_state("Log in from the sidebar to use this section.")
+    return False
 
 
 def render_offer_card(offer: dict[str, Any], is_best: bool) -> None:
@@ -445,6 +473,9 @@ def page_agent() -> None:
         "The agent calls the offer and policy tools itself, then commits to BUY, WAIT or RE-EVALUATE.",
     )
 
+    if not require_login():
+        return
+
     st.caption("Start from an example")
     for column, prompt in zip(st.columns(len(EXAMPLE_PROMPTS)), EXAMPLE_PROMPTS):
         if column.button(prompt, use_container_width=True, key=f"example_{prompt}"):
@@ -500,6 +531,9 @@ def page_watchlist() -> None:
         "Search for the product, pick the exact version, and set a target price to watch for.",
     )
 
+    if not require_login():
+        return
+
     left, right = st.columns([1.15, 1], gap="large")
 
     with left:
@@ -539,7 +573,6 @@ def page_watchlist() -> None:
                     variant_id = variant_options[variant_choice]
 
                     with st.form("watchlist_form"):
-                        user_id = st.text_input("User ID", placeholder="devashish")
                         target_price = st.number_input(
                             "Target price",
                             min_value=0.0,
@@ -550,47 +583,48 @@ def page_watchlist() -> None:
                         submitted = st.form_submit_button("Add to watchlist", type="primary", use_container_width=True)
 
                     if submitted:
-                        if not user_id.strip():
-                            st.warning("A user ID is required before the variant can be watched.")
-                        else:
-                            with st.spinner("Saving to the watchlist…"):
-                                try:
-                                    entry = create_watchlist_entry(
-                                        user_id.strip(),
-                                        int(variant_id),
-                                        float(target_price) if target_price is not None else None,
-                                    )
-                                    entry["variant_label"] = variant_choice
-                                    entry["product_name"] = choice
-                                except ApiError as error:
-                                    st.error(str(error))
-                                else:
-                                    st.session_state.setdefault("watchlist_added", []).insert(0, entry)
-                                    st.toast("Added to the watchlist", icon="📌")
-                                    st.success(f"Watching {choice} — {variant_choice} for {entry['user_id']}.")
+                        with st.spinner("Saving to the watchlist…"):
+                            try:
+                                create_watchlist_entry(
+                                    int(variant_id),
+                                    float(target_price) if target_price is not None else None,
+                                )
+                            except ApiError as error:
+                                st.error(str(error))
+                            else:
+                                st.session_state.pop("my_watchlist", None)
+                                st.toast("Added to the watchlist", icon="📌")
+                                st.success(f"Watching {choice} — {variant_choice}.")
 
     with right:
-        st.caption("Added this session")
-        added = st.session_state.get("watchlist_added", [])
-        if not added:
-            empty_state("Nothing added yet.")
+        st.caption("Your watchlist")
+        if st.button("Refresh", key="wl_refresh_btn"):
+            st.session_state.pop("my_watchlist", None)
+
+        if "my_watchlist" not in st.session_state:
+            with st.spinner("Loading your watchlist…"):
+                try:
+                    st.session_state["my_watchlist"] = fetch_my_watchlist()
+                except ApiError as error:
+                    st.session_state["my_watchlist"] = []
+                    st.error(str(error))
+
+        watching = st.session_state.get("my_watchlist", [])
+        if not watching:
+            empty_state("Nothing on your watchlist yet.")
         else:
-            for entry in added:
+            for entry in watching:
                 target = entry.get("target_price")
                 target_line = f"Target {target:,.2f}" if target is not None else "No target price"
-                item_label = entry.get("product_name") and entry.get("variant_label")
-                item_label = f"{entry['product_name']} — {entry['variant_label']}" if item_label else f"Variant #{entry['variant_id']}"
                 st.markdown(
                     f'<div class="bw-card"><div class="bw-row">'
-                    f'<span class="bw-seller">{html.escape(str(entry["user_id"]))}</span>'
+                    f'<span class="bw-seller">Variant #{entry["variant_id"]}</span>'
                     f'<span class="bw-badge bw-badge-best">#{entry["watchlist_id"]}</span></div>'
-                    f'<div class="bw-meta" style="margin-top:0.45rem">{html.escape(item_label)} · '
-                    f'{html.escape(target_line)}</div>'
+                    f'<div class="bw-meta" style="margin-top:0.45rem">{html.escape(target_line)}</div>'
                     f'<div class="bw-meta">Created {html.escape(pretty_timestamp(entry.get("created_at")))}</div>'
                     f"</div>",
                     unsafe_allow_html=True,
                 )
-        st.caption("The backend has no list endpoint, so this panel only reflects the current session.")
 
 
 def render_policy_chunk(chunk: dict[str, Any]) -> None:
@@ -694,10 +728,64 @@ PAGES = {
 }
 
 
+def render_auth_section() -> None:
+    if st.session_state.get("token"):
+        st.markdown(f"**Signed in as** {html.escape(st.session_state['username'])}")
+        if st.button("Log out", use_container_width=True):
+            st.session_state["token"] = None
+            st.session_state["username"] = None
+            st.session_state.pop("my_watchlist", None)
+            st.rerun()
+        return
+
+    login_tab, signup_tab = st.tabs(["Log in", "Sign up"])
+
+    with login_tab:
+        with st.form("login_form"):
+            username = st.text_input("Username", key="login_username")
+            password = st.text_input("Password", type="password", key="login_password")
+            submitted = st.form_submit_button("Log in", type="primary", use_container_width=True)
+
+        if submitted:
+            if not username.strip() or not password:
+                st.warning("Enter a username and password.")
+            else:
+                try:
+                    token_response = login_user(username.strip(), password)
+                except ApiError as error:
+                    st.error(str(error))
+                else:
+                    st.session_state["token"] = token_response["access_token"]
+                    st.session_state["username"] = username.strip()
+                    st.rerun()
+
+    with signup_tab:
+        with st.form("signup_form"):
+            new_username = st.text_input("Username", key="signup_username")
+            new_password = st.text_input(
+                "Password", type="password", key="signup_password", help="At least 8 characters."
+            )
+            created = st.form_submit_button("Create account", type="primary", use_container_width=True)
+
+        if created:
+            if not new_username.strip() or not new_password:
+                st.warning("Enter a username and password.")
+            else:
+                try:
+                    signup_user(new_username.strip(), new_password)
+                except ApiError as error:
+                    st.error(str(error))
+                else:
+                    st.success("Account created — log in above.")
+
+
 def render_sidebar() -> str:
     with st.sidebar:
         st.markdown("### 🛒 BuyWise AI")
         st.caption("Autonomous shopping & price intelligence")
+        st.divider()
+
+        render_auth_section()
         st.divider()
 
         choice = st.radio("Section", list(PAGES), label_visibility="collapsed")
@@ -720,6 +808,8 @@ def render_sidebar() -> str:
 
 def main() -> None:
     st.set_page_config(page_title="BuyWise AI", page_icon="🛒", layout="wide", initial_sidebar_state="expanded")
+    st.session_state.setdefault("token", None)
+    st.session_state.setdefault("username", None)
     st.markdown(CSS, unsafe_allow_html=True)
     PAGES[render_sidebar()]()
 
